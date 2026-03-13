@@ -16,7 +16,7 @@ from models import (
 )
 from scraper import scrape_boletin_oficial
 
-app = FastAPI(title="Botletín API", version="0.2.0")
+app = FastAPI(title="Botletín API", version="0.3.0")
 
 # ── CORS — allow the Vite dev server ─────────────────────────
 app.add_middleware(
@@ -45,15 +45,11 @@ def scrape_website(background_tasks: BackgroundTasks, db: Session = Depends(get_
 
 
 # ════════════════════════════════════════════════════════════
-# STATS  (new — used by frontend Feed header)
+# STATS
 # ════════════════════════════════════════════════════════════
 
 @app.get("/stats", tags=["stats"])
 def get_stats(fecha: Optional[date] = None, db: Session = Depends(get_db)):
-    """
-    Returns daily counts for the feed header.
-    Defaults to today if no fecha is supplied.
-    """
     target = fecha or date.today()
 
     total = (
@@ -98,41 +94,44 @@ def get_stats(fecha: Optional[date] = None, db: Session = Depends(get_db)):
 
 @app.get("/resolutions/", response_model=List[ResolutionSummarySchema], tags=["resolutions"])
 def get_resolutions(
-    db:        Session       = Depends(get_db),
-    skip:      int           = 0,
-    limit:     int           = 100,
-    fecha:     Optional[date]= None,
-    tipo:      Optional[str] = None,
-    organismo: Optional[str] = None,
-    area:      Optional[str] = None,
+    db:        Session        = Depends(get_db),
+    skip:      int            = 0,
+    limit:     int            = 100,
+    fecha:     Optional[date] = None,
+    tipo:      Optional[str]  = None,
+    organismo: Optional[str]  = None,
+    area:      Optional[str]  = None,
+    categoria: Optional[str]  = None,
+    tema:      Optional[str]  = None,
 ):
     q = db.query(Resolution)
     if fecha:     q = q.filter(Resolution.fecha     == fecha)
     if tipo:      q = q.filter(Resolution.tipo      == tipo)
     if organismo: q = q.filter(Resolution.organismo == organismo)
     if area:      q = q.filter(Resolution.area      == area)
+    if categoria: q = q.filter(Resolution.categoria == categoria)
+    if tema:      q = q.filter(Resolution.tema      == tema)
     return q.order_by(Resolution.fecha.desc()).offset(skip).limit(limit).all()
 
 
 @app.get("/resolutions/search", response_model=List[ResolutionSummarySchema], tags=["resolutions"])
 def search_resolutions(
-    db:        Session       = Depends(get_db),
-    q:         Optional[str] = Query(None, description="Full-text search across titulo, resumen, organismo"),
-    tipo:      Optional[str] = Query(None),
-    area:      Optional[str] = Query(None),
-    organismo: Optional[str] = Query(None),
-    # periodo shortcuts
-    desde:     Optional[date]= Query(None),
-    hasta:     Optional[date]= Query(None),
-    skip:      int           = 0,
-    limit:     int           = 50,
+    db:        Session        = Depends(get_db),
+    q:         Optional[str]  = Query(None, description="Full-text search across titulo, resumen, organismo"),
+    tipo:      Optional[str]  = Query(None),
+    area:      Optional[str]  = Query(None),
+    organismo: Optional[str]  = Query(None),
+    # ── Nuevos filtros ──
+    categoria: Optional[str]  = Query(None, description="personal | normativa | licitaciones"),
+    tema:      Optional[str]  = Query(None, description="politica | economia | salud | etc."),
+    # ── Período ──
+    desde:     Optional[date] = Query(None),
+    hasta:     Optional[date] = Query(None),
+    skip:      int            = 0,
+    limit:     int            = 50,
 ):
-    """
-    Full-text search + filter endpoint used by the Búsqueda screen.
-    """
     query = db.query(Resolution)
 
-    # Free-text across titulo, resumen, organismo
     if q:
         like = f"%{q}%"
         query = query.filter(
@@ -147,6 +146,8 @@ def search_resolutions(
     if tipo:      query = query.filter(Resolution.tipo.ilike(f"%{tipo}%"))
     if area:      query = query.filter(Resolution.area.ilike(f"%{area}%"))
     if organismo: query = query.filter(Resolution.organismo.ilike(f"%{organismo}%"))
+    if categoria: query = query.filter(Resolution.categoria == categoria)
+    if tema:      query = query.filter(Resolution.tema      == tema)
     if desde:     query = query.filter(Resolution.fecha >= desde)
     if hasta:     query = query.filter(Resolution.fecha <= hasta)
 
@@ -168,7 +169,7 @@ def get_resolution(resolution_id: int, db: Session = Depends(get_db)):
 
 
 # ════════════════════════════════════════════════════════════
-# ALERTAS  (new)
+# ALERTAS
 # ════════════════════════════════════════════════════════════
 
 @app.get("/alertas", response_model=List[AlertaSchema], tags=["alertas"])
@@ -180,6 +181,26 @@ def list_alertas(db: Session = Depends(get_db)):
 def create_alerta(payload: AlertaCreateSchema, db: Session = Depends(get_db)):
     alerta = Alerta(**payload.model_dump())
     db.add(alerta)
+    db.commit()
+    db.refresh(alerta)
+    return alerta
+
+
+@app.put("/alertas/{alerta_id}", response_model=AlertaSchema, tags=["alertas"])
+def update_alerta(alerta_id: int, payload: AlertaCreateSchema, db: Session = Depends(get_db)):
+    """
+    Reemplaza todos los campos editables de una alerta existente.
+    Usa AlertaCreateSchema (mismo payload que POST) para no duplicar modelos.
+    El campo `activa` se preserva — para activar/desactivar usar PATCH.
+    """
+    alerta = db.query(Alerta).filter(Alerta.id == alerta_id).first()
+    if not alerta:
+        raise HTTPException(status_code=404, detail="Alerta not found")
+
+    data = payload.model_dump()
+    for field, value in data.items():
+        setattr(alerta, field, value)
+
     db.commit()
     db.refresh(alerta)
     return alerta
@@ -216,9 +237,8 @@ def get_historial(
         .limit(limit)
         .all()
     )
-    result = []
-    for row in rows:
-        result.append(AlertaNotificacionSchema(
+    return [
+        AlertaNotificacionSchema(
             id=row.id,
             alerta_id=row.alerta_id,
             resolution_id=row.resolution_id,
@@ -226,8 +246,9 @@ def get_historial(
             leida=bool(row.leida),
             alerta_nombre=row.alerta.nombre if row.alerta else None,
             resolution_titulo=row.resolution.titulo if row.resolution else None,
-        ))
-    return result
+        )
+        for row in rows
+    ]
 
 
 @app.patch("/alertas/historial/{notif_id}/leida", tags=["alertas"])
