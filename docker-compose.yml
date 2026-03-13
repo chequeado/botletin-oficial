@@ -17,11 +17,12 @@ services:
       # Expose directly for local dev/debugging — not needed in prod
       - "8000:8000"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/stats"]
+      # python:3.11-slim no incluye curl — usar wget (sí disponible) o python
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/stats')"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
   frontend:
     build:
