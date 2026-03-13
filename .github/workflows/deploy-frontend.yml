@@ -42,8 +42,8 @@ jobs:
       - name: Activar mock data y buildear
         working-directory: frontend
         env:
-          # Vite reemplaza esta variable en build time — ver api.js
           VITE_USE_MOCK: 'true'
+          VITE_BASE_URL: '/botletin-oficial/'
         run: npm run build
 
       - name: Configurar GitHub Pages

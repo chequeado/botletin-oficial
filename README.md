@@ -29,17 +29,17 @@ El sistema tiene tres componentes principales que se orquestan con Docker Compos
 │  SQLite — /app/data/         │
 │  boletinoficial.db           │
 └──────────┬───────────────────┘
-           │                    │
-           ▼                    ▼
-┌──────────────────┐   ┌──────────────────────┐
-│  FastAPI         │   │  Publisher           │
-│  api/main.py     │   │  publisher/main.py   │
-│                  │   │                      │
-│  GET /stats      │   │  Lee JSON del día    │
-│  GET /resolutions│   │  Rankea por score    │
-│  GET /alertas    │   │  Renderiza template  │
-│  POST /scrape    │   │  Envía email         │
-└────────┬─────────┘   └──────────────────────┘
+           │                   
+           ▼                  
+┌──────────────────┐   
+│  FastAPI         │   
+│  api/main.py     │   
+│                  │   
+│  GET /stats      │  
+│  GET /resolutions│   
+│  GET /alertas    │   
+│  POST /scrape    │   
+└────────┬─────────┘   
          │
          ▼
 ┌──────────────────────────────┐
@@ -47,34 +47,6 @@ El sistema tiene tres componentes principales que se orquestan con Docker Compos
 │  Feed / Búsqueda / Alertas   │
 └──────────────────────────────┘
 ```
-
----
-
-## Dependencias externas
-
-**APIs y servicios de terceros:**
-
-| Servicio | Uso |
-|----------|-----|
-| OpenAI API (`gpt-4o-mini`) | Análisis de publicaciones: extrae organismo, resumen, designaciones, renuncias y prórrogas |
-| Mailchimp Transactional (ex-Mandrill) | Envío de emails diarios con el digest del boletín |
-| boletinoficial.gob.ar | Fuente de datos — scraping de la sección Primera |
-
----
-
-## Configuración
-
-```bash
-cp .env.example .env
-```
-
-| Variable | Descripción | Ejemplo |
-|----------|-------------|---------|
-| `OPENAI_API_KEY` | API key de OpenAI para el análisis de publicaciones | `sk-proj-abc123...` |
-| `MAILCHIMP_API_KEY` | API key de Mailchimp Transactional para el envío de emails | `abc123def456...` |
-| `DATABASE_URL` | ⚠️ Opcional. Override del path de SQLite. Por defecto usa el volumen Docker | `sqlite:////app/data/boletinoficial.db` |
-
-⚠️ No usar comentarios inline en el `.env` (en la misma línea que el valor). `python-dotenv` los incluye como parte del valor y rompe la autenticación silenciosamente. Ejemplo incorrecto: `OPENAI_API_KEY=sk-abc # mi clave`.
 
 ---
 
@@ -148,18 +120,6 @@ curl "http://localhost:8000/resolutions/?fecha=$(date +%Y-%m-%d)"
 # Buscar por texto
 curl "http://localhost:8000/resolutions/search?q=ministerio+economia"
 ```
-
-### Frontend
-
-El frontend tiene un modo mock activado por defecto (`USE_MOCK = true` en `frontend/api.js`). Para conectar con la API real:
-
-```js
-// frontend/api.js
-const USE_MOCK = false  // cambiar de true a false
-```
-
----
-
 ## Logs y monitoreo
 
 ```bash
@@ -173,16 +133,3 @@ curl http://localhost:8000/stats
 # Ver el estado de los contenedores y healthcheck
 docker compose ps
 ```
-
-### Troubleshooting
-
-| Síntoma | Qué revisar |
-|---------|-------------|
-| `dependency failed to start: container botletin-api is unhealthy` | La imagen `python:3.11-slim` no incluye `curl`. El healthcheck debe usar `python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/stats')"` — ver `docker-compose.yml` |
-| El scraping no genera datos | Verificar que `OPENAI_API_KEY` esté seteada y sin espacios ni comentarios inline. Revisar `docker compose logs api` |
-| Emails no se envían | Verificar `MAILCHIMP_API_KEY`. El from_email `innovacion@chequeado.com` debe estar verificado en Mailchimp Transactional |
-| Frontend muestra datos de ejemplo en producción | `USE_MOCK` está en `true` en `frontend/api.js`. Cambiar a `false` y rebuildar |
-| `Resolution not found` en `/resolutions/{id}` | La base de datos está vacía. Disparar un scraping con `POST /scrape/` o esperar al cron del día siguiente |
-| Variables de entorno no se leen | Comentarios inline en `.env` rompen python-dotenv. Mover comentarios a líneas separadas |
-
----
