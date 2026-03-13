@@ -11,7 +11,7 @@ from datetime import date
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////app/data/boletinoficial.db")
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},  # needed for SQLite + FastAPI
+    connect_args={"check_same_thread": False},
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -22,6 +22,23 @@ class ChargeChangeType(enum.Enum):
     ALTA     = "Alta"
     BAJA     = "Baja"
     PRORROGA = "Prorroga"
+
+class CategoriaType(enum.Enum):
+    PERSONAL     = "personal"
+    NORMATIVA    = "normativa"
+    LICITACIONES = "licitaciones"
+
+class TemaType(enum.Enum):
+    POLITICA       = "politica"
+    JUSTICIA       = "justicia"
+    ECONOMIA       = "economia"
+    INFRAESTRUCTURA= "infraestructura"
+    SALUD          = "salud"
+    EDUCACION      = "educacion"
+    MEDIOAMBIENTE  = "medioambiente"
+    SOCIEDAD       = "sociedad"
+    EXTERIOR       = "exterior"
+    DEFENSA        = "defensa"
 
 
 # ── ORM Models ────────────────────────────────────────────────
@@ -36,9 +53,10 @@ class Resolution(Base):
     organismo      = Column(String,   index=True)
     area           = Column(String,   index=True)
     texto_completo = Column(Text)
-    resumen        = Column(Text,     default="")   # NEW: AI-generated summary
-    score          = Column(Integer,  default=0)    # NEW: relevance score
-    # BUG FIX: archivos stored as JSON, default to [] not None
+    resumen        = Column(Text,     default="")
+    score          = Column(Integer,  default=0)
+    categoria      = Column(String,   default="normativa", index=True)  # NEW
+    tema           = Column(String,   default="politica",  index=True)  # NEW
     archivos       = Column(JSON,     default=list)
 
     administrative_changes = relationship(
@@ -62,7 +80,7 @@ class AdministrativeChargesChange(Base):
     resolution = relationship("Resolution", back_populates="administrative_changes")
 
 
-# ── Alerta models (new) ───────────────────────────────────────
+# ── Alerta models ─────────────────────────────────────────────
 class CanalType(enum.Enum):
     EMAIL    = "email"
     TELEGRAM = "telegram"
@@ -78,12 +96,12 @@ class Alerta(Base):
     id          = Column(Integer, primary_key=True, index=True)
     nombre      = Column(String)
     descripcion = Column(Text,    default="")
-    keywords    = Column(JSON,    default=list)   # list of strings
-    tipos       = Column(JSON,    default=list)   # list of ChargeChangeType values
-    organismos  = Column(JSON,    default=list)   # list of organismo names
+    keywords    = Column(JSON,    default=list)
+    tipos       = Column(JSON,    default=list)
+    organismos  = Column(JSON,    default=list)
     canal       = Column(Enum(CanalType),       default=CanalType.EMAIL)
     frecuencia  = Column(Enum(FrecuenciaType),  default=FrecuenciaType.DIARIO)
-    activa      = Column(Integer, default=1)      # 1 = on, 0 = off (SQLite bool)
+    activa      = Column(Integer, default=1)
 
     historial = relationship(
         "AlertaNotificacion",
@@ -99,7 +117,7 @@ class AlertaNotificacion(Base):
     alerta_id     = Column(Integer, ForeignKey("alertas.id"))
     resolution_id = Column(Integer, ForeignKey("resolutions.id"))
     fecha         = Column(Date,    index=True)
-    leida         = Column(Integer, default=0)  # 0 = nueva, 1 = leida
+    leida         = Column(Integer, default=0)
 
     alerta     = relationship("Alerta",     back_populates="historial")
     resolution = relationship("Resolution")
@@ -117,7 +135,7 @@ def get_db() -> Generator:
         db.close()
 
 
-# ── Pydantic schemas (response models) ───────────────────────
+# ── Pydantic schemas ──────────────────────────────────────────
 class AdministrativeChargesChangeSchema(BaseModel):
     tipo:     ChargeChangeType
     nombre:   str
@@ -125,7 +143,7 @@ class AdministrativeChargesChangeSchema(BaseModel):
     dni:      Optional[str] = None
     replaces: Optional[str] = None
 
-    model_config = {"from_attributes": True}   # Pydantic v2 (replaces orm_mode)
+    model_config = {"from_attributes": True}
 
 
 class ResolutionSchema(BaseModel):
@@ -138,7 +156,8 @@ class ResolutionSchema(BaseModel):
     area:           str
     resumen:        str = ""
     score:          int = 0
-    # BUG FIX: archivos is Optional — DB may return None for old rows
+    categoria:      str = "normativa"
+    tema:           str = "politica"
     archivos:       Optional[List[str]] = []
     administrative_changes: List[AdministrativeChargesChangeSchema] = []
 
@@ -146,16 +165,17 @@ class ResolutionSchema(BaseModel):
 
 
 class ResolutionSummarySchema(BaseModel):
-    """Lightweight version for list/search responses — no full text."""
-    id:       int
-    fecha:    date
-    titulo:   str
-    url:      str
-    tipo:     str
-    organismo:str
-    area:     str
-    resumen:  str = ""
-    score:    int = 0
+    id:        int
+    fecha:     date
+    titulo:    str
+    url:       str
+    tipo:      str
+    organismo: str
+    area:      str
+    resumen:   str = ""
+    score:     int = 0
+    categoria: str = "normativa"
+    tema:      str = "politica"
 
     model_config = {"from_attributes": True}
 
@@ -173,7 +193,6 @@ class AlertaSchema(BaseModel):
 
     model_config = {"from_attributes": True}
 
-    # SQLite stores activa as int — coerce to bool
     @classmethod
     def model_validate(cls, obj, *args, **kwargs):
         if hasattr(obj, "__dict__") and "activa" in obj.__dict__:

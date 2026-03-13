@@ -4,10 +4,23 @@ import { getStats, getFeed } from '../api'
 import Modal from './Modal'
 
 const COLUMNS = [
-  { key: 'personal',    label: 'Movimientos de personal' },
-  { key: 'normativa',   label: 'Normativa y regulaciones' },
-  { key: 'licitaciones',label: 'Licitaciones y contratos' },
+  { key: 'personal',     label: 'Movimientos de personal' },
+  { key: 'normativa',    label: 'Normativa y regulaciones' },
+  { key: 'licitaciones', label: 'Licitaciones y contratos' },
 ]
+
+const TEMA_LABELS = {
+  politica:        'Política',
+  justicia:        'Justicia',
+  economia:        'Economía',
+  infraestructura: 'Infraestructura',
+  salud:           'Salud',
+  educacion:       'Educación',
+  medioambiente:   'Medio ambiente',
+  sociedad:        'Sociedad',
+  exterior:        'Exterior',
+  defensa:         'Defensa',
+}
 
 export default function Feed() {
   const [stats,   setStats]   = useState(null)
@@ -23,8 +36,9 @@ export default function Feed() {
     })
   }, [])
 
-  const featured  = items.find(i => i.destacado)
-  const byColumna = (key) => items.filter(i => i.columna === key)
+  // El item destacado es el de mayor score
+  const featured     = items[0]
+  const byCategoria  = (key) => items.filter(i => i.categoria === key && i !== featured)
 
   if (loading) return <div className="page" style={{ color: 'var(--ink-muted)', fontSize: 13 }}>Cargando...</div>
 
@@ -48,12 +62,17 @@ export default function Feed() {
       {featured && (
         <div className="featured-item" onClick={() => setModal(featured)}>
           <div>
-            <span className={`tipo-badge ${featured.tipo}`}>{featured.tipoLabel}</span>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+              <span className={`tipo-badge ${featured.categoria}`}>{featured.categoria}</span>
+              {featured.tema && (
+                <span className="tema-badge">{TEMA_LABELS[featured.tema] || featured.tema}</span>
+              )}
+              <span className="score-badge">★ {featured.score}</span>
+            </div>
             <div className="featured-titulo">{featured.titulo}</div>
-            <div className="aviso-bajada">{featured.bajada}</div>
+            <div className="aviso-bajada">{featured.resumen}</div>
             <div className="aviso-meta">{featured.organismo} · {featured.fecha}</div>
           </div>
-          <div className="aviso-num-big">{featured.numero}</div>
         </div>
       )}
 
@@ -61,11 +80,21 @@ export default function Feed() {
         {COLUMNS.map(col => (
           <div key={col.key}>
             <div className="feed-col-head">{col.label}</div>
-            {byColumna(col.key).map(item => (
+            {byCategoria(col.key).length === 0 && (
+              <div style={{ fontSize: 12, color: 'var(--ink-faint)', padding: '8px 0' }}>
+                Sin publicaciones
+              </div>
+            )}
+            {byCategoria(col.key).map(item => (
               <div key={item.id} className="aviso" onClick={() => setModal(item)}>
-                <span className={`tipo-badge ${item.tipo}`}>{item.tipoLabel}</span>
+                <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 4 }}>
+                  <span className={`tipo-badge ${item.categoria}`}>{item.tipo}</span>
+                  {item.tema && (
+                    <span className="tema-badge">{TEMA_LABELS[item.tema] || item.tema}</span>
+                  )}
+                </div>
                 <div className="aviso-titulo">{item.titulo}</div>
-                <div className="aviso-bajada">{item.bajada}</div>
+                <div className="aviso-bajada">{item.resumen}</div>
                 <div className="aviso-meta">{item.organismo} · {item.fecha}</div>
               </div>
             ))}

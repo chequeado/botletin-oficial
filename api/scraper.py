@@ -57,10 +57,13 @@ async def scrape_article(article_url: str, db: Session) -> Resolution | None:
         titulo=title,
         url=article_url,
         tipo=tipo,
-        organismo="",      # populated by prompt below
+        organismo="",
         area=area,
         texto_completo=content,
-        resumen="",        # populated by prompt below
+        resumen="",
+        score=0,
+        categoria="normativa",
+        tema="politica",
         archivos=[],
     )
 
@@ -68,6 +71,9 @@ async def scrape_article(article_url: str, db: Session) -> Resolution | None:
         analysis_result = prompt.analyze(content)
         resolution.resumen   = analysis_result.get("resumen", "")
         resolution.organismo = analysis_result.get("organismo", area)
+        resolution.score     = analysis_result.get("score", 0)
+        resolution.categoria = analysis_result.get("categoria", "normativa")
+        resolution.tema      = analysis_result.get("tema", "politica")
         process_analysis_result(resolution, analysis_result)
     except Exception as e:
         print(f"  [WARN] Prompt failed for {article_url}: {e}")
@@ -86,12 +92,11 @@ def process_analysis_result(resolution: Resolution, analysis_result: Dict[str, A
 
 
 def _create_change(resolution: Resolution, data: Dict[str, Any], change_type: ChargeChangeType):
-    # BUG FIX: was `null` (JS) instead of `None` (Python)
     admin_change = AdministrativeChargesChange(
         tipo=change_type,
         nombre=data.get("nombre", ""),
         cargo=data.get("cargo", ""),
-        dni=data.get("dni"),          # None if missing — correct Python null
+        dni=data.get("dni"),
         replaces=data.get("replaces"),
     )
     resolution.administrative_changes.append(admin_change)
@@ -105,7 +110,8 @@ async def scrape_boletin_oficial(db: Session):
         print(f"  [{i+1}/{len(urls)}] {url}")
         resolution = await scrape_article(url, db)
         if resolution:
-            print(f"    ✓ {resolution.titulo[:60]}  ({len(resolution.administrative_changes)} changes)")
+            changes = len(resolution.administrative_changes)
+            print(f"    ✓ [{resolution.categoria}/{resolution.tema}] score={resolution.score} — {resolution.titulo[:60]} ({changes} changes)")
 
     db.commit()
     print("Scraping complete.")
