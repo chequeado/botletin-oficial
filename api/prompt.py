@@ -1,47 +1,69 @@
-
+# api/prompt.py
 import os
-import time
-
-from openai import OpenAI
 import json
+from openai import OpenAI
 
-client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-delimiter = "####"
-MAX_TOKENS = 4096
+SYSTEM_PROMPT = """Sos un periodista político en Argentina especializado en el seguimiento
+del Boletín Oficial. Analizás publicaciones oficiales y extraés información estructurada."""
+
+# ── 3. Improved prompt — also returns resumen + organismo ────
+ANALYZE_PROMPT = """Analizá la siguiente publicación del Boletín Oficial argentino y devolvé un JSON con esta estructura exacta:
+
+{
+  "organismo": "nombre del organismo emisor (ministerio, secretaría, ente, etc.)",
+  "resumen": "resumen en 1-2 oraciones en lenguaje claro y directo, sin jerga legal",
+  "designaciones": [
+    { "nombre": "...", "cargo": "...", "dni": "..." }
+  ],
+  "renuncias": [
+    { "nombre": "...", "cargo": "...", "dni": "..." }
+  ],
+  "prorrogas": [
+    { "nombre": "...", "cargo": "...", "dni": "..." }
+  ]
+}
+
+Reglas:
+- Si no hay designaciones/renuncias/prórrogas, dejá las listas vacías.
+- El resumen debe ser comprensible para un ciudadano sin formación legal.
+- Si falta nombre o cargo en una entrada, no la incluyas.
+- Respondé SOLO con el JSON, sin bloques de código ni texto adicional.
+
+Publicación:
+"""
 
 
-def get_completion(prompt, model="gpt-4o-mini"):
-    messages = [{"role": "user", "content": prompt}]
-    response = client.chat.completions.create(model=model,
-    messages=messages,
-    temperature=0)
-    return response.choices[0].message.content
+def analyze(content: str) -> dict:
+    """
+    Sends content to the LLM and returns structured data.
+    Returns empty structure on failure — never raises.
+    """
+    empty = {"organismo": "", "resumen": "", "designaciones": [], "renuncias": [], "prorrogas": []}
 
-def analyze(content):
-    PROMPT = """Sos un periodista político en Argentina que sigue las renuncias y designaciones de los funcionarios del Gobierno de Argentina.  
-        Necesito identificar en publicaciones del Boletín Oficial renuncias, designaciones y prórrogas. Tu trabajo es leer una publicación del boletín y encontrar y listar, en el caso de que haya, todas las renuncias, designaciones y prórrogas de cargos.
-        Si para algun caso falta alguno de los campos obligatorios, no devuelvas esa designacion renuncia o prorroga. 
-        Para cada renuncia y designación lista la siguiente información: 
+    if not content or not content.strip():
+        return empty
 
-        Cargo (cargo) - obligatorio
-        Nombre (nombre) - obligatorio
-        Documento Nacional de Identidad (dni) 
-        Resolución (titulo de la resolución general)
-
-        Devuelve el resultado en formato JSON, con tres listados: uno para designaciones, otro para renuncias y otro para prorrogas.
-        Si no hay respuesta ni resolucion, devuelve un diccionario vacío. Siempre responde en formato JSON, sin usar el formating. "```json", directamente el codigo json plano.
-        Resolución:
-        """ + content
-
-    response = get_completion(PROMPT)
-
-    print(response)
+    # Truncate to avoid token limits (~12k chars ≈ 3k tokens, well within gpt-4o-mini)
+    truncated = content[:12_000]
 
     try:
-        analysis_result = json.loads(response)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user",   "content": ANALYZE_PROMPT + truncated},
+            ],
+            temperature=0,
+            response_format={"type": "json_object"},  # forces valid JSON output
+        )
+        raw = response.choices[0].message.content
+        return json.loads(raw)
+
     except json.JSONDecodeError as e:
-        print(f"Error parsing JSON from analyze function: {e}")
-        print(f"Raw output from analyze function: {response}")
-    
-    return analysis_result
+        print(f"[WARN] JSON parse error in analyze(): {e}")
+        return empty
+    except Exception as e:
+        print(f"[ERROR] OpenAI call failed: {e}")
+        return empty

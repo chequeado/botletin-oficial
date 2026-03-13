@@ -1,0 +1,63 @@
+# docker-compose.yml  (repo root)
+services:
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: botletin-api
+    restart: unless-stopped
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MAILCHIMP_API_KEY=${MAILCHIMP_API_KEY}
+    volumes:
+      # Persist the SQLite database between restarts
+      - botletin-db:/app/data
+    ports:
+      # Expose directly for local dev/debugging — not needed in prod
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: botletin-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Optional: runs the ETL scraper on a cron inside Docker
+  # instead of relying on GitHub Actions
+  scheduler:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: botletin-scheduler
+    restart: unless-stopped
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MAILCHIMP_API_KEY=${MAILCHIMP_API_KEY}
+    volumes:
+      - botletin-db:/app/data
+    # Runs the ETL every weekday at 4:15 AM (matches the GitHub Action)
+    command: >
+      sh -c "
+        pip install supercronic -q &&
+        echo '15 4 * * 1-5 python etl/main.py' > /crontab &&
+        supercronic /crontab
+      "
+    profiles:
+      - scheduler   # opt-in: docker compose --profile scheduler up
+
+volumes:
+  botletin-db:
+    driver: local
